@@ -1,25 +1,22 @@
-//  package main
+// package main
 
 // import (
-// 	"context"
 // 	"encoding/json"
 // 	"fmt"
-// 	"io"
-// 	"io/ioutil"
 // 	"log"
 // 	"net/http"
 // 	"os"
 // 	"sort"
 
+// 	"github.com/labstack/echo/v4"
 // 	"golang.org/x/oauth2"
 // 	"golang.org/x/oauth2/google"
 // 	"google.golang.org/api/drive/v3"
 // )
 
 // func getDriveService() (*drive.Service, error) {
-// 	b, err := ioutil.ReadFile("credentials.json")
+// 	b, err := os.ReadFile("credentials.json")
 // 	if err != nil {
-// 		fmt.Printf("Unable to read credentials.json file. Err: %v\n", err)
 // 		return nil, err
 // 	}
 
@@ -31,13 +28,11 @@
 // 	client := getClient(config)
 
 // 	service, err := drive.New(client)
-
 // 	if err != nil {
-// 		fmt.Printf("Cannot create the Google Drive service: %v\n", err)
 // 		return nil, err
 // 	}
 
-// 	return service, err
+// 	return service, nil
 // }
 
 // func getClient(config *oauth2.Config) *http.Client {
@@ -47,7 +42,7 @@
 // 		tok = getTokenFromWeb(config)
 // 		saveToken(tokFile, tok)
 // 	}
-// 	return config.Client(context.Background(), tok)
+// 	return config.Client(oauth2.NoContext, tok)
 // }
 
 // func tokenFromFile(file string) (*oauth2.Token, error) {
@@ -72,15 +67,15 @@
 // 		log.Fatalf("Unable to read authorization code %v", err)
 // 	}
 
-// 	tok, err := config.Exchange(context.Background(), authCode)
+// 	tok, err := config.Exchange(oauth2.NoContext, authCode)
 // 	if err != nil {
 // 		log.Fatalf("Unable to retrieve token from web %v", err)
 // 	}
 // 	return tok
 // }
 
-// func listPDFFiles(service *drive.Service) ([]*drive.File, error) {
-// 	q := "mimeType='application/pdf'"
+// func listPDFFiles(service *drive.Service, folderID string) ([]*drive.File, error) {
+// 	q := fmt.Sprintf("'%s' in parents and mimeType='application/pdf'", folderID)
 // 	files, err := service.Files.List().Q(q).Do()
 // 	if err != nil {
 // 		return nil, err
@@ -93,13 +88,13 @@
 // 		return nil, fmt.Errorf("no PDF files found")
 // 	}
 
-// 	// Sort files by modified time in descending order
 // 	sort.Slice(files, func(i, j int) bool {
 // 		return files[i].ModifiedTime > files[j].ModifiedTime
 // 	})
 
 // 	return files[0], nil
 // }
+
 // func saveToken(path string, token *oauth2.Token) {
 // 	fmt.Printf("Saving credential file to: %s\n", path)
 // 	tokenJSON, err := json.Marshal(token)
@@ -107,19 +102,20 @@
 // 		log.Fatalf("Unable to marshal token: %v", err)
 // 	}
 
-// 	err = ioutil.WriteFile(path, tokenJSON, 0600)
+// 	err = os.WriteFile(path, tokenJSON, 0600)
 // 	if err != nil {
 // 		log.Fatalf("Unable to write token to file: %v", err)
 // 	}
 // }
-// func downloadPDFFile(service *drive.Service, file *drive.File) error {
-// 	resp, err := service.Files.Get(file.Id).Download()
+
+// func downloadFile(service *drive.Service, fileID, filePath string) error {
+// 	resp, err := service.Files.Get(fileID).Download()
 // 	if err != nil {
 // 		return err
 // 	}
 // 	defer resp.Body.Close()
 
-// 	out, err := os.Create(file.Name)
+// 	out, err := os.Create(filePath)
 // 	if err != nil {
 // 		return err
 // 	}
@@ -134,29 +130,41 @@
 // }
 
 // func main() {
-// 	// Get Drive service
-// 	srv, err := getDriveService()
-// 	if err != nil {
-// 		log.Fatalf("Unable to retrieve Drive service: %v", err)
-// 	}
+// 	e := echo.New()
 
-// 	// List PDF files
-// 	files, err := listPDFFiles(srv)
-// 	if err != nil {
-// 		log.Fatalf("Unable to list PDF files: %v", err)
-// 	}
+// 	e.GET("/download-latest-pdf", func(c echo.Context) error {
+// 		log.Println("google drive service called")
+// 		srv, err := getDriveService()
+// 		if err != nil {
+// 			return c.String(http.StatusInternalServerError, fmt.Sprintf("Unable to retrieve Drive service: %v", err))
+// 		}
 
-// 	// Get the latest PDF file
-// 	latestPDF, err := getLatestPDFFile(files)
-// 	if err != nil {
-// 		log.Fatalf("Unable to get the latest PDF file: %v", err)
-// 	}
+// 		// Replace "YOUR_FOLDER_ID" with the actual ID of the folder you want to search in
+// 		folderID := "YOUR_FOLDER_ID"
 
-// 	// Download the latest PDF file
-// 	err = downloadPDFFile(srv, latestPDF)
-// 	if err != nil {
-// 		log.Fatalf("Unable to download PDF file: %v", err)
-// 	}
+// 		files, err := listPDFFiles(srv, folderID)
+// 		if err != nil {
+// 			return c.String(http.StatusInternalServerError, fmt.Sprintf("Unable to list PDF files: %v", err))
+// 		}
 
-// 	fmt.Printf("Latest PDF file downloaded: %s\n", latestPDF.Name)
+// 		latestPDF, err := getLatestPDFFile(files)
+// 		if err != nil {
+// 			if err.Error() == "no PDF files found" {
+// 				return c.String(http.StatusNotFound, "No PDF files found in the specified folder")
+// 			}
+// 			return c.String(http.StatusInternalServerError, fmt.Sprintf("Unable to get the latest PDF file: %v", err))
+// 		}
+
+// 		// Replace "YOUR_DOWNLOAD_PATH" with the path where you want to save the downloaded PDF file
+// 		downloadPath := "YOUR_DOWNLOAD_PATH/latest.pdf"
+
+// 		err = downloadFile(srv, latestPDF.Id, downloadPath)
+// 		if err != nil {
+// 			return c.String(http.StatusInternalServerError, fmt.Sprintf("Unable to download the latest PDF file: %v", err))
+// 		}
+
+// 		return c.String(http.StatusOK, "Latest PDF file downloaded successfully")
+// 	})
+
+// 	e.Logger.Fatal(e.Start(":8080"))
 // }
